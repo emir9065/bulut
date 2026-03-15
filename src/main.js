@@ -300,12 +300,12 @@ const state = {
       pause: false,
       shop: false,
       confirm: false,
-      fullscreen: false,
       shopPrev: false,
       shopNext: false,
       shopSelect: false,
       shopClose: false,
     },
+    lastAttackTapMs: 0,
     ui: null,
   },
 };
@@ -322,7 +322,6 @@ const TOUCH_TAP_KEY_MAP = {
   pause: 'KeyP',
   shop: 'KeyK',
   confirm: 'Enter',
-  fullscreen: 'KeyF',
   shopPrev: 'ArrowUp',
   shopNext: 'ArrowDown',
   shopSelect: 'Enter',
@@ -364,6 +363,7 @@ function releaseAllTouchHolds() {
   for (const control of Object.keys(state.touch.hold)) {
     setTouchHold(control, false);
   }
+  state.touch.ui?.releaseMovePad?.();
 }
 
 function syncTouchControlsToKeys() {
@@ -412,9 +412,6 @@ function setupTouchUi() {
     confirm: makeButton('confirm', 'START', true),
     pause: makeButton('pause', 'PAUSE', true),
     shop: makeButton('shop', 'SHOP', true),
-    fullscreen: makeButton('fullscreen', 'FULL', true),
-    left: makeButton('left', 'LEFT'),
-    right: makeButton('right', 'RIGHT'),
     jump: makeButton('jump', 'JUMP'),
     attack: makeButton('attack', 'ATK'),
     dash: makeButton('dash', 'DASH'),
@@ -425,18 +422,21 @@ function setupTouchUi() {
   };
 
   topLeft.append(buttons.confirm, buttons.pause);
-  topRight.append(buttons.shop, buttons.fullscreen);
+  topRight.append(buttons.shop);
   top.append(topLeft, topRight);
 
   const bottom = document.createElement('div');
   bottom.className = 'touch-bottom';
-  const leftCluster = document.createElement('div');
-  leftCluster.className = 'touch-side';
-  leftCluster.append(buttons.left, buttons.right);
+  const movePad = document.createElement('div');
+  movePad.className = 'touch-move-pad';
+  const moveKnob = document.createElement('div');
+  moveKnob.className = 'touch-move-knob';
+  movePad.append(moveKnob);
   const rightCluster = document.createElement('div');
-  rightCluster.className = 'touch-side';
+  rightCluster.className = 'touch-action-cluster';
+  buttons.attack.classList.add('touch-btn-primary');
   rightCluster.append(buttons.jump, buttons.attack, buttons.dash);
-  bottom.append(leftCluster, rightCluster);
+  bottom.append(movePad, rightCluster);
 
   const shopRow = document.createElement('div');
   shopRow.className = 'touch-shop';
@@ -446,7 +446,10 @@ function setupTouchUi() {
   app.append(root);
 
   const activePointers = new Map();
-  const holdControls = new Set(['left', 'right', 'attack']);
+  const holdControls = new Set(['attack']);
+  let movePadPointerId = null;
+  const MOVE_PAD_RANGE = 34;
+  const MOVE_PAD_DEADZONE = 10;
 
   const handleDown = (event) => {
     event.preventDefault();
@@ -469,6 +472,64 @@ function setupTouchUi() {
     }
   };
 
+  const resetMovePad = () => {
+    movePadPointerId = null;
+    setTouchHold('left', false);
+    setTouchHold('right', false);
+    movePad.classList.remove('active');
+    moveKnob.style.transform = 'translate(-50%, -50%)';
+  };
+
+  const updateMovePad = (event) => {
+    const rect = movePad.getBoundingClientRect();
+    const centerX = rect.left + rect.width * 0.5;
+    const dx = clamp(event.clientX - centerX, -MOVE_PAD_RANGE, MOVE_PAD_RANGE);
+    moveKnob.style.transform = `translate(calc(-50% + ${dx}px), -50%)`;
+    if (dx < -MOVE_PAD_DEADZONE) {
+      setTouchHold('left', true);
+      setTouchHold('right', false);
+    } else if (dx > MOVE_PAD_DEADZONE) {
+      setTouchHold('left', false);
+      setTouchHold('right', true);
+    } else {
+      setTouchHold('left', false);
+      setTouchHold('right', false);
+    }
+  };
+
+  const startMovePad = (event) => {
+    if (!state.touch.enabled || state.mode !== MODES.PLAYING) {
+      return;
+    }
+    event.preventDefault();
+    sound.touch();
+    movePadPointerId = event.pointerId;
+    movePad.setPointerCapture(event.pointerId);
+    movePad.classList.add('active');
+    updateMovePad(event);
+  };
+
+  const movePadDrag = (event) => {
+    if (event.pointerId !== movePadPointerId) {
+      return;
+    }
+    event.preventDefault();
+    updateMovePad(event);
+  };
+
+  const endMovePad = (event) => {
+    if (event.pointerId !== movePadPointerId) {
+      return;
+    }
+    resetMovePad();
+  };
+
+  movePad.addEventListener('pointerdown', startMovePad, { passive: false });
+  movePad.addEventListener('pointermove', movePadDrag, { passive: false });
+  movePad.addEventListener('pointerup', endMovePad);
+  movePad.addEventListener('pointercancel', endMovePad);
+  movePad.addEventListener('pointerleave', endMovePad);
+
   for (const button of Object.values(buttons)) {
     button.addEventListener('pointerdown', handleDown);
     button.addEventListener('pointerup', handleUp);
@@ -476,16 +537,31 @@ function setupTouchUi() {
     button.addEventListener('pointerleave', handleUp);
   }
 
-  canvas.addEventListener('pointerdown', () => {
+  canvas.addEventListener('pointerdown', (event) => {
     if (!state.touch.enabled) {
       return;
     }
+    event.preventDefault();
+
     if (state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY) {
       triggerTouchTap('confirm');
     } else if (state.mode === MODES.PAUSED) {
       triggerTouchTap('pause');
+    } else if (state.mode === MODES.PLAYING) {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      if (x >= rect.width * 0.5) {
+        triggerTouchTap('attack');
+        const now = performance.now();
+        if (now - state.touch.lastAttackTapMs < 260) {
+          triggerTouchTap('dash');
+        }
+        state.touch.lastAttackTapMs = now;
+      } else {
+        triggerTouchTap('jump');
+      }
     }
-  });
+  }, { passive: false });
 
   window.addEventListener('blur', releaseAllTouchHolds);
   window.addEventListener('pointercancel', releaseAllTouchHolds);
@@ -493,7 +569,9 @@ function setupTouchUi() {
   state.touch.ui = {
     root,
     shopRow,
+    movePad,
     buttons,
+    releaseMovePad: resetMovePad,
   };
 }
 
@@ -514,6 +592,10 @@ function updateTouchUiState() {
 
   const { buttons, shopRow } = state.touch.ui;
 
+  if (state.mode !== MODES.PLAYING) {
+    state.touch.ui.releaseMovePad?.();
+  }
+
   buttons.confirm.hidden = !(state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY || state.mode === MODES.PAUSED);
   if (state.mode === MODES.MENU) {
     buttons.confirm.textContent = 'START';
@@ -531,7 +613,7 @@ function updateTouchUiState() {
     state.mode === MODES.VICTORY ||
     state.mode === MODES.PAUSED;
   buttons.pause.textContent = state.mode === MODES.PAUSED ? 'PLAY' : 'PAUSE';
-  buttons.shop.hidden = state.mode === MODES.SHOP;
+  buttons.shop.hidden = state.mode === MODES.SHOP || !state.shopUnlocked;
   buttons.shop.disabled = !state.shopUnlocked;
 
   const inShop = state.mode === MODES.SHOP;
@@ -785,7 +867,8 @@ function damagePlayer(amount) {
   }
 
   const modifiers = getStatModifiers();
-  const adjusted = amount * modifiers.defenseMultiplier;
+  const mobileEase = state.touch.enabled ? 0.85 : 1;
+  const adjusted = amount * modifiers.defenseMultiplier * mobileEase;
   player.hp -= adjusted;
   player.invulnTime = 0.5;
   sound.sfxHit();
@@ -1198,18 +1281,6 @@ function updateCamera() {
 
 function processGlobalInputs() {
   const escapePressed = state.keysPressed.has('Escape');
-  if (escapePressed && document.fullscreenElement) {
-    document.exitFullscreen().catch(() => {});
-    return;
-  }
-
-  if (state.keysPressed.has('KeyF')) {
-    if (!document.fullscreenElement) {
-      canvas.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  }
 
   if ((escapePressed || state.keysPressed.has('KeyP')) && state.mode === MODES.PLAYING) {
     state.mode = MODES.PAUSED;
@@ -1571,13 +1642,15 @@ function drawOverlay() {
     ctx.font = `${mobile ? 22 : 25}px Trebuchet MS`;
     ctx.fillStyle = '#f2fbff';
     if (mobile) {
-      ctx.fillText('Touch controls: LEFT/RIGHT + JUMP/ATK/DASH', centerX, 300);
-      ctx.fillText('Top buttons: START, PAUSE, SHOP, FULL', centerX, 340);
-      ctx.fillText('Tap START to begin', centerX, 404);
-      ctx.fillText('Biomes: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 454);
+      ctx.fillText('Touch controls: MOVE PAD + JUMP/ATK/DASH', centerX, 300);
+      ctx.fillText('Top buttons: START, PAUSE, SHOP', centerX, 340);
+      ctx.fillText('Tap left half to jump, right half to attack', centerX, 390);
+      ctx.fillText('Double tap right half to dash', centerX, 430);
+      ctx.fillText('Tap START to begin', centerX, 480);
+      ctx.fillText('Biomes: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 530);
     } else {
       ctx.fillText('Arrow Keys = Move | A = Attack | Shift = Dash', centerX, 250);
-      ctx.fillText('Esc/P = Pause | F = Fullscreen | K = Shop (when unlocked)', centerX, 290);
+      ctx.fillText('Esc/P = Pause | K = Shop (when unlocked)', centerX, 290);
       ctx.fillText('Press Enter to Start', centerX, 380);
       ctx.fillText('Mobile: Use on-screen controls and tap START', centerX, 420);
       ctx.fillText('Objective order: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 470);
@@ -1819,7 +1892,15 @@ function resizeCanvas() {
 }
 
 window.addEventListener('resize', resizeCanvas);
-document.addEventListener('fullscreenchange', resizeCanvas);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    releaseAllTouchHolds();
+    if (state.mode === MODES.PLAYING) {
+      state.mode = MODES.PAUSED;
+      state.previousMode = MODES.PLAYING;
+    }
+  }
+});
 
 window.addEventListener('keydown', (event) => {
   sound.touch();
