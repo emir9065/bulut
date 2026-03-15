@@ -377,6 +377,13 @@ function makeBiomeState(biomeIndex) {
     freezeMeter: 0,
     freezeTick: 0,
     objectiveTimer: biome.objective.type === 'survive' ? biome.objective.target : 0,
+    exitGate: {
+      x: biome.worldWidth - 84,
+      y: GROUND_Y - 114,
+      w: 64,
+      h: 114,
+      reached: false,
+    },
     chest: biome.objective.type === 'chest'
       ? { x: biome.worldWidth - 240, y: GROUND_Y - 52, w: 44, h: 34, found: false }
       : null,
@@ -766,6 +773,18 @@ function updatePlayer() {
     sound.sfxCollect();
     grantBiomeCompletion();
   }
+
+  if (
+    bState.exitGate &&
+    (intersects(worldRect(player), bState.exitGate) || player.x >= bState.biome.worldWidth - player.w - 4)
+  ) {
+    if (!bState.exitGate.reached) {
+      bState.exitGate.reached = true;
+      state.score += 10;
+      sound.sfxCollect();
+    }
+    grantBiomeCompletion();
+  }
 }
 
 function updateProjectiles() {
@@ -1119,6 +1138,18 @@ function drawWorld() {
     ctx.fillRect(bState.chest.x, bState.chest.y + 14, bState.chest.w, 10);
   }
 
+  if (!bState.exitGate.reached) {
+    const gate = bState.exitGate;
+    ctx.fillStyle = `${biome.palette.accent}99`;
+    ctx.fillRect(gate.x, gate.y, gate.w, gate.h);
+    ctx.strokeStyle = '#dff9ff';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(gate.x, gate.y, gate.w, gate.h);
+    ctx.fillStyle = '#dff9ff';
+    ctx.font = '16px Trebuchet MS';
+    ctx.fillText('EXIT', gate.x + 11, gate.y - 8);
+  }
+
   const player = bState.player;
   const equipped = getEquippedItem();
   const playerColor = equipped?.color || biome.palette.accent;
@@ -1172,12 +1203,12 @@ function objectiveText() {
   const bState = state.biomeState;
   const objective = bState.biome.objective;
   if (objective.type === 'kills') {
-    return `${objective.label}: ${bState.objectiveProgress}/${objective.target}`;
+    return `${objective.label}: ${bState.objectiveProgress}/${objective.target} | Reach EXIT`;
   }
   if (objective.type === 'chest') {
-    return `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'}`;
+    return `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'} | Reach EXIT`;
   }
-  return `${objective.label}: ${bState.objectiveTimer.toFixed(1)}s`;
+  return `${objective.label}: ${bState.objectiveTimer.toFixed(1)}s | Reach EXIT`;
 }
 
 function drawHud() {
@@ -1393,9 +1424,14 @@ window.render_game_to_text = () => {
     },
     visibleEnemies,
     visibleProjectiles,
-    pickups: bState.chest && !bState.chest.found
-      ? [{ type: 'chest', x: bState.chest.x, y: bState.chest.y }]
-      : [],
+    pickups: [
+      ...(bState.chest && !bState.chest.found
+        ? [{ type: 'chest', x: bState.chest.x, y: bState.chest.y }]
+        : []),
+      ...(!bState.exitGate.reached
+        ? [{ type: 'exit_gate', x: bState.exitGate.x, y: bState.exitGate.y }]
+        : []),
+    ],
   };
 
   return JSON.stringify(payload);
