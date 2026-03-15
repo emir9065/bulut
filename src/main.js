@@ -276,7 +276,252 @@ const state = {
   flashTextTimer: 0,
   cameraX: 0,
   biomeState: null,
+  touch: {
+    enabled: false,
+    hold: {
+      left: false,
+      right: false,
+      attack: false,
+    },
+    tap: {
+      jump: false,
+      dash: false,
+      pause: false,
+      shop: false,
+      confirm: false,
+      fullscreen: false,
+      shopPrev: false,
+      shopNext: false,
+      shopSelect: false,
+      shopClose: false,
+    },
+    ui: null,
+  },
 };
+
+const TOUCH_HOLD_KEY_MAP = {
+  left: 'ArrowLeft',
+  right: 'ArrowRight',
+  attack: 'KeyA',
+};
+
+const TOUCH_TAP_KEY_MAP = {
+  jump: 'Space',
+  dash: 'ShiftLeft',
+  pause: 'KeyP',
+  shop: 'KeyK',
+  confirm: 'Enter',
+  fullscreen: 'KeyF',
+  shopPrev: 'ArrowUp',
+  shopNext: 'ArrowDown',
+  shopSelect: 'Enter',
+  shopClose: 'Escape',
+};
+
+function isLikelyMobilePlaySurface() {
+  return (
+    window.matchMedia('(pointer: coarse)').matches ||
+    navigator.maxTouchPoints > 0 ||
+    window.innerWidth <= 900
+  );
+}
+
+function setTouchHold(control, pressed) {
+  if (!(control in state.touch.hold)) {
+    return;
+  }
+  state.touch.hold[control] = pressed;
+  const button = state.touch.ui?.buttons?.[control];
+  if (button) {
+    button.classList.toggle('active', pressed);
+  }
+}
+
+function triggerTouchTap(control) {
+  if (!(control in state.touch.tap)) {
+    return;
+  }
+  state.touch.tap[control] = true;
+  const button = state.touch.ui?.buttons?.[control];
+  if (button) {
+    button.classList.add('active');
+    window.setTimeout(() => button.classList.remove('active'), 90);
+  }
+}
+
+function releaseAllTouchHolds() {
+  for (const control of Object.keys(state.touch.hold)) {
+    setTouchHold(control, false);
+  }
+}
+
+function syncTouchControlsToKeys() {
+  for (const [control, code] of Object.entries(TOUCH_HOLD_KEY_MAP)) {
+    if (state.touch.hold[control]) {
+      state.keysDown.add(code);
+    } else {
+      state.keysDown.delete(code);
+    }
+  }
+
+  for (const [control, code] of Object.entries(TOUCH_TAP_KEY_MAP)) {
+    if (state.touch.tap[control]) {
+      let mappedCode = code;
+      if (control === 'confirm' && state.mode === MODES.PAUSED) {
+        mappedCode = 'KeyP';
+      }
+      state.keysPressed.add(mappedCode);
+      state.touch.tap[control] = false;
+    }
+  }
+}
+
+function setupTouchUi() {
+  const root = document.createElement('div');
+  root.id = 'touch-ui';
+  root.classList.add('hidden');
+
+  const makeButton = (control, label, wide = false) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `touch-btn${wide ? ' wide' : ''}`;
+    button.dataset.control = control;
+    button.textContent = label;
+    return button;
+  };
+
+  const top = document.createElement('div');
+  top.className = 'touch-top';
+  const topLeft = document.createElement('div');
+  topLeft.className = 'touch-side';
+  const topRight = document.createElement('div');
+  topRight.className = 'touch-side';
+
+  const buttons = {
+    confirm: makeButton('confirm', 'START', true),
+    pause: makeButton('pause', 'PAUSE', true),
+    shop: makeButton('shop', 'SHOP', true),
+    fullscreen: makeButton('fullscreen', 'FULL', true),
+    left: makeButton('left', 'LEFT'),
+    right: makeButton('right', 'RIGHT'),
+    jump: makeButton('jump', 'JUMP'),
+    attack: makeButton('attack', 'ATK'),
+    dash: makeButton('dash', 'DASH'),
+    shopPrev: makeButton('shopPrev', 'UP'),
+    shopNext: makeButton('shopNext', 'DOWN'),
+    shopSelect: makeButton('shopSelect', 'BUY', true),
+    shopClose: makeButton('shopClose', 'CLOSE', true),
+  };
+
+  topLeft.append(buttons.confirm, buttons.pause);
+  topRight.append(buttons.shop, buttons.fullscreen);
+  top.append(topLeft, topRight);
+
+  const bottom = document.createElement('div');
+  bottom.className = 'touch-bottom';
+  const leftCluster = document.createElement('div');
+  leftCluster.className = 'touch-side';
+  leftCluster.append(buttons.left, buttons.right);
+  const rightCluster = document.createElement('div');
+  rightCluster.className = 'touch-side';
+  rightCluster.append(buttons.jump, buttons.attack, buttons.dash);
+  bottom.append(leftCluster, rightCluster);
+
+  const shopRow = document.createElement('div');
+  shopRow.className = 'touch-shop';
+  shopRow.append(buttons.shopPrev, buttons.shopNext, buttons.shopSelect, buttons.shopClose);
+
+  root.append(top, shopRow, bottom);
+  app.append(root);
+
+  const activePointers = new Map();
+  const holdControls = new Set(['left', 'right', 'attack']);
+
+  const handleDown = (event) => {
+    event.preventDefault();
+    const control = event.currentTarget.dataset.control;
+    sound.touch();
+    if (holdControls.has(control)) {
+      setTouchHold(control, true);
+      activePointers.set(event.pointerId, control);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    triggerTouchTap(control);
+  };
+
+  const handleUp = (event) => {
+    const control = activePointers.get(event.pointerId);
+    if (control) {
+      setTouchHold(control, false);
+      activePointers.delete(event.pointerId);
+    }
+  };
+
+  for (const button of Object.values(buttons)) {
+    button.addEventListener('pointerdown', handleDown);
+    button.addEventListener('pointerup', handleUp);
+    button.addEventListener('pointercancel', handleUp);
+    button.addEventListener('pointerleave', handleUp);
+  }
+
+  canvas.addEventListener('pointerdown', () => {
+    if (!state.touch.enabled) {
+      return;
+    }
+    if (state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY) {
+      triggerTouchTap('confirm');
+    } else if (state.mode === MODES.PAUSED) {
+      triggerTouchTap('pause');
+    }
+  });
+
+  window.addEventListener('blur', releaseAllTouchHolds);
+  window.addEventListener('pointercancel', releaseAllTouchHolds);
+
+  state.touch.ui = {
+    root,
+    shopRow,
+    buttons,
+  };
+}
+
+function updateTouchUiState() {
+  if (!state.touch.ui) {
+    return;
+  }
+
+  const enabled = isLikelyMobilePlaySurface();
+  state.touch.enabled = enabled;
+  state.touch.ui.root.classList.toggle('hidden', !enabled);
+
+  if (!enabled) {
+    releaseAllTouchHolds();
+    return;
+  }
+
+  const { buttons, shopRow } = state.touch.ui;
+
+  buttons.confirm.hidden = !(state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY || state.mode === MODES.PAUSED);
+  if (state.mode === MODES.MENU) {
+    buttons.confirm.textContent = 'START';
+  } else if (state.mode === MODES.BIOME_COMPLETE) {
+    buttons.confirm.textContent = 'NEXT';
+  } else if (state.mode === MODES.VICTORY) {
+    buttons.confirm.textContent = 'RESTART';
+  } else if (state.mode === MODES.PAUSED) {
+    buttons.confirm.textContent = 'RESUME';
+  }
+
+  buttons.pause.hidden = state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY;
+  buttons.pause.textContent = state.mode === MODES.PAUSED ? 'PLAY' : 'PAUSE';
+  buttons.shop.hidden = state.mode === MODES.SHOP;
+  buttons.shop.disabled = !state.shopUnlocked;
+
+  const inShop = state.mode === MODES.SHOP;
+  shopRow.hidden = !inShop;
+  buttons.shopSelect.textContent = 'BUY';
+}
 
 function getEquippedItem() {
   return SHOP_ITEMS.find((item) => item.id === state.equippedItemId) || null;
@@ -1259,7 +1504,8 @@ function drawOverlay() {
     ctx.fillText('Arrow Keys = Move | A = Attack | Shift = Dash', 305, 250);
     ctx.fillText('Esc/P = Pause | F = Fullscreen | K = Shop (when unlocked)', 238, 290);
     ctx.fillText('Press Enter to Start', 490, 380);
-    ctx.fillText('Objective order: Forest, Sea, Volcano, Snow, Cave, Space', 260, 450);
+    ctx.fillText('Mobile: Use on-screen controls and tap START', 345, 420);
+    ctx.fillText('Objective order: Forest, Sea, Volcano, Snow, Cave, Space', 260, 470);
     return;
   }
 
@@ -1352,6 +1598,8 @@ function draw() {
 }
 
 function tick() {
+  updateTouchUiState();
+  syncTouchControlsToKeys();
   processGlobalInputs();
   if (state.mode !== MODES.SHOP && state.mode !== MODES.PAUSED && state.mode !== MODES.MENU && state.mode !== MODES.VICTORY && state.mode !== MODES.BIOME_COMPLETE && !state.biomeState) {
     state.biomeState = makeBiomeState(state.biomeIndex);
@@ -1408,6 +1656,7 @@ window.render_game_to_text = () => {
     coordinateSystem: 'origin top-left, +x right, +y down',
     mode: state.mode,
     biome: bState.biome.name,
+    mobileControlsEnabled: state.touch.enabled,
     objectiveProgress,
     score: Math.floor(state.score),
     hp: Number(bState.player.hp.toFixed(1)),
@@ -1441,6 +1690,7 @@ function resizeCanvas() {
   const scale = Math.min(window.innerWidth / VIEW_WIDTH, window.innerHeight / VIEW_HEIGHT);
   canvas.style.width = `${Math.floor(VIEW_WIDTH * scale)}px`;
   canvas.style.height = `${Math.floor(VIEW_HEIGHT * scale)}px`;
+  updateTouchUiState();
 }
 
 window.addEventListener('resize', resizeCanvas);
@@ -1465,7 +1715,9 @@ window.addEventListener('mousedown', () => {
 });
 
 state.biomeState = makeBiomeState(0);
+setupTouchUi();
 resizeCanvas();
+updateTouchUiState();
 
 tick();
 

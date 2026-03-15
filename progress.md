@@ -9,3 +9,6 @@ Original prompt: PLEASE IMPLEMENT THIS PLAN for a side-view biome combat platfor
 - Adjusted input priority so `Esc` exits fullscreen before pause/shop handling, matching the control contract.
 - Fix branch `codex/fix-forest-exit-clear`: added explicit `exitGate` progression trigger so touching biome end clears level and enables Enter-to-next flow.
 - Verified fix with browser automation: touching forest exit sets `mode=biome_complete`, then pressing Enter transitions to `Sea` biome.
+- Branch `codex/mobile-friendly-web-play`: added phone-friendly touch controls (movement, jump, attack, dash, pause/resume, fullscreen, shop actions), mobile UI state handling, and touch-safe styling.
+- Added touch input -> key mapping pipeline so on-screen controls drive the same gameplay logic as keyboard input.
+- Verified mobile viewport playability via browser automation: START button, hold-to-move, jump/attack/dash, pause/resume, fullscreen, and `mobileControlsEnabled=true` in text state.
