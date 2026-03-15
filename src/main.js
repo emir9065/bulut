@@ -300,12 +300,12 @@ const state = {
       pause: false,
       shop: false,
       confirm: false,
-      fullscreen: false,
       shopPrev: false,
       shopNext: false,
       shopSelect: false,
       shopClose: false,
     },
+    lastAttackTapMs: 0,
     ui: null,
   },
 };
@@ -322,7 +322,6 @@ const TOUCH_TAP_KEY_MAP = {
   pause: 'KeyP',
   shop: 'KeyK',
   confirm: 'Enter',
-  fullscreen: 'KeyF',
   shopPrev: 'ArrowUp',
   shopNext: 'ArrowDown',
   shopSelect: 'Enter',
@@ -364,6 +363,7 @@ function releaseAllTouchHolds() {
   for (const control of Object.keys(state.touch.hold)) {
     setTouchHold(control, false);
   }
+  state.touch.ui?.releaseMovePad?.();
 }
 
 function syncTouchControlsToKeys() {
@@ -412,9 +412,6 @@ function setupTouchUi() {
     confirm: makeButton('confirm', 'START', true),
     pause: makeButton('pause', 'PAUSE', true),
     shop: makeButton('shop', 'SHOP', true),
-    fullscreen: makeButton('fullscreen', 'FULL', true),
-    left: makeButton('left', 'LEFT'),
-    right: makeButton('right', 'RIGHT'),
     jump: makeButton('jump', 'JUMP'),
     attack: makeButton('attack', 'ATK'),
     dash: makeButton('dash', 'DASH'),
@@ -425,18 +422,21 @@ function setupTouchUi() {
   };
 
   topLeft.append(buttons.confirm, buttons.pause);
-  topRight.append(buttons.shop, buttons.fullscreen);
+  topRight.append(buttons.shop);
   top.append(topLeft, topRight);
 
   const bottom = document.createElement('div');
   bottom.className = 'touch-bottom';
-  const leftCluster = document.createElement('div');
-  leftCluster.className = 'touch-side';
-  leftCluster.append(buttons.left, buttons.right);
+  const movePad = document.createElement('div');
+  movePad.className = 'touch-move-pad';
+  const moveKnob = document.createElement('div');
+  moveKnob.className = 'touch-move-knob';
+  movePad.append(moveKnob);
   const rightCluster = document.createElement('div');
-  rightCluster.className = 'touch-side';
+  rightCluster.className = 'touch-action-cluster';
+  buttons.attack.classList.add('touch-btn-primary');
   rightCluster.append(buttons.jump, buttons.attack, buttons.dash);
-  bottom.append(leftCluster, rightCluster);
+  bottom.append(movePad, rightCluster);
 
   const shopRow = document.createElement('div');
   shopRow.className = 'touch-shop';
@@ -446,7 +446,10 @@ function setupTouchUi() {
   app.append(root);
 
   const activePointers = new Map();
-  const holdControls = new Set(['left', 'right', 'attack']);
+  const holdControls = new Set(['attack']);
+  let movePadPointerId = null;
+  const MOVE_PAD_RANGE = 34;
+  const MOVE_PAD_DEADZONE = 10;
 
   const handleDown = (event) => {
     event.preventDefault();
@@ -469,6 +472,64 @@ function setupTouchUi() {
     }
   };
 
+  const resetMovePad = () => {
+    movePadPointerId = null;
+    setTouchHold('left', false);
+    setTouchHold('right', false);
+    movePad.classList.remove('active');
+    moveKnob.style.transform = 'translate(-50%, -50%)';
+  };
+
+  const updateMovePad = (event) => {
+    const rect = movePad.getBoundingClientRect();
+    const centerX = rect.left + rect.width * 0.5;
+    const dx = clamp(event.clientX - centerX, -MOVE_PAD_RANGE, MOVE_PAD_RANGE);
+    moveKnob.style.transform = `translate(calc(-50% + ${dx}px), -50%)`;
+    if (dx < -MOVE_PAD_DEADZONE) {
+      setTouchHold('left', true);
+      setTouchHold('right', false);
+    } else if (dx > MOVE_PAD_DEADZONE) {
+      setTouchHold('left', false);
+      setTouchHold('right', true);
+    } else {
+      setTouchHold('left', false);
+      setTouchHold('right', false);
+    }
+  };
+
+  const startMovePad = (event) => {
+    if (!state.touch.enabled || state.mode !== MODES.PLAYING) {
+      return;
+    }
+    event.preventDefault();
+    sound.touch();
+    movePadPointerId = event.pointerId;
+    movePad.setPointerCapture(event.pointerId);
+    movePad.classList.add('active');
+    updateMovePad(event);
+  };
+
+  const movePadDrag = (event) => {
+    if (event.pointerId !== movePadPointerId) {
+      return;
+    }
+    event.preventDefault();
+    updateMovePad(event);
+  };
+
+  const endMovePad = (event) => {
+    if (event.pointerId !== movePadPointerId) {
+      return;
+    }
+    resetMovePad();
+  };
+
+  movePad.addEventListener('pointerdown', startMovePad, { passive: false });
+  movePad.addEventListener('pointermove', movePadDrag, { passive: false });
+  movePad.addEventListener('pointerup', endMovePad);
+  movePad.addEventListener('pointercancel', endMovePad);
+  movePad.addEventListener('pointerleave', endMovePad);
+
   for (const button of Object.values(buttons)) {
     button.addEventListener('pointerdown', handleDown);
     button.addEventListener('pointerup', handleUp);
@@ -476,16 +537,31 @@ function setupTouchUi() {
     button.addEventListener('pointerleave', handleUp);
   }
 
-  canvas.addEventListener('pointerdown', () => {
+  canvas.addEventListener('pointerdown', (event) => {
     if (!state.touch.enabled) {
       return;
     }
+    event.preventDefault();
+
     if (state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY) {
       triggerTouchTap('confirm');
     } else if (state.mode === MODES.PAUSED) {
       triggerTouchTap('pause');
+    } else if (state.mode === MODES.PLAYING) {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      if (x >= rect.width * 0.5) {
+        triggerTouchTap('attack');
+        const now = performance.now();
+        if (now - state.touch.lastAttackTapMs < 260) {
+          triggerTouchTap('dash');
+        }
+        state.touch.lastAttackTapMs = now;
+      } else {
+        triggerTouchTap('jump');
+      }
     }
-  });
+  }, { passive: false });
 
   window.addEventListener('blur', releaseAllTouchHolds);
   window.addEventListener('pointercancel', releaseAllTouchHolds);
@@ -493,7 +569,9 @@ function setupTouchUi() {
   state.touch.ui = {
     root,
     shopRow,
+    movePad,
     buttons,
+    releaseMovePad: resetMovePad,
   };
 }
 
@@ -514,6 +592,10 @@ function updateTouchUiState() {
 
   const { buttons, shopRow } = state.touch.ui;
 
+  if (state.mode !== MODES.PLAYING) {
+    state.touch.ui.releaseMovePad?.();
+  }
+
   buttons.confirm.hidden = !(state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY || state.mode === MODES.PAUSED);
   if (state.mode === MODES.MENU) {
     buttons.confirm.textContent = 'START';
@@ -531,7 +613,7 @@ function updateTouchUiState() {
     state.mode === MODES.VICTORY ||
     state.mode === MODES.PAUSED;
   buttons.pause.textContent = state.mode === MODES.PAUSED ? 'PLAY' : 'PAUSE';
-  buttons.shop.hidden = state.mode === MODES.SHOP;
+  buttons.shop.hidden = state.mode === MODES.SHOP || !state.shopUnlocked;
   buttons.shop.disabled = !state.shopUnlocked;
 
   const inShop = state.mode === MODES.SHOP;
@@ -785,7 +867,8 @@ function damagePlayer(amount) {
   }
 
   const modifiers = getStatModifiers();
-  const adjusted = amount * modifiers.defenseMultiplier;
+  const mobileEase = state.touch.enabled ? 0.85 : 1;
+  const adjusted = amount * modifiers.defenseMultiplier * mobileEase;
   player.hp -= adjusted;
   player.invulnTime = 0.5;
   sound.sfxHit();
@@ -1198,18 +1281,6 @@ function updateCamera() {
 
 function processGlobalInputs() {
   const escapePressed = state.keysPressed.has('Escape');
-  if (escapePressed && document.fullscreenElement) {
-    document.exitFullscreen().catch(() => {});
-    return;
-  }
-
-  if (state.keysPressed.has('KeyF')) {
-    if (!document.fullscreenElement) {
-      canvas.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  }
 
   if ((escapePressed || state.keysPressed.has('KeyP')) && state.mode === MODES.PLAYING) {
     state.mode = MODES.PAUSED;
@@ -1463,16 +1534,58 @@ function drawWorld() {
   ctx.restore();
 }
 
-function objectiveText() {
-  const bState = state.biomeState;
+function formatWeaponName(weapon) {
+  return weapon
+    .split('_')
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(' ');
+}
+
+function getObjectiveStatus(bState) {
   const objective = bState.biome.objective;
   if (objective.type === 'kills') {
-    return `${objective.label}: ${bState.objectiveProgress}/${objective.target} | Reach EXIT`;
+    return {
+      full: `${objective.label}: ${bState.objectiveProgress}/${objective.target}  |  Reach EXIT`,
+      compact: `${objective.label} ${bState.objectiveProgress}/${objective.target}`,
+      ratio: clamp(bState.objectiveProgress / objective.target, 0, 1),
+    };
   }
   if (objective.type === 'chest') {
-    return `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'} | Reach EXIT`;
+    return {
+      full: `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'}  |  Reach EXIT`,
+      compact: `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'}`,
+      ratio: bState.chest?.found ? 1 : 0,
+    };
   }
-  return `${objective.label}: ${bState.objectiveTimer.toFixed(1)}s | Reach EXIT`;
+  return {
+    full: `${objective.label}: ${bState.objectiveTimer.toFixed(1)}s  |  Reach EXIT`,
+    compact: `${objective.label}: ${bState.objectiveTimer.toFixed(0)}s`,
+    ratio: clamp(bState.objectiveTimer / objective.target, 0, 1),
+  };
+}
+
+function drawRoundedRect(x, y, w, h, radius, fillStyle, strokeStyle = null, lineWidth = 1) {
+  const r = Math.min(radius, w * 0.5, h * 0.5);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fillStyle) {
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+  }
+  if (strokeStyle) {
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = strokeStyle;
+    ctx.stroke();
+  }
 }
 
 function drawHud() {
@@ -1480,78 +1593,122 @@ function drawHud() {
   const player = bState.player;
   const viewWidth = getViewWidth();
   const mobile = state.touch.enabled;
-  const pad = mobile ? 10 : 12;
+  const pad = mobile ? 10 : 14;
+  const panelX = pad;
+  const panelY = mobile ? 84 : 10;
+  const panelW = viewWidth - pad * 2;
+  const panelH = mobile ? 146 : 124;
+  const hpRatio = clamp(player.hp / player.maxHp, 0, 1);
+  const accent = bState.biome.palette.accent;
+  const objective = getObjectiveStatus(bState);
+  const scoreText = `${Math.floor(state.score)} pts`;
+  const shopText = state.shopUnlocked ? 'Shop Ready' : `Shop in ${Math.max(0, 175 - Math.floor(state.score))}`;
+  const weaponText = formatWeaponName(bState.biome.weapon);
+  const skinText = getEquippedItem()?.name || 'Default Neon';
+
+  const gradient = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+  gradient.addColorStop(0, 'rgba(8, 18, 34, 0.9)');
+  gradient.addColorStop(1, 'rgba(5, 12, 24, 0.84)');
+  drawRoundedRect(panelX, panelY, panelW, panelH, 18, gradient, `${accent}bb`, 2);
+  ctx.strokeStyle = 'rgba(219, 248, 255, 0.16)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(panelX + 18, panelY + 42);
+  ctx.lineTo(panelX + panelW - 18, panelY + 42);
+  ctx.stroke();
 
   if (mobile) {
-    const hudTop = 88;
-    const hudHeight = 118;
-    const hpWidth = 132;
-    const hpX = viewWidth - hpWidth - 14;
-    const objective = bState.biome.objective;
-    let compactObjective = 'Reach EXIT';
-    if (objective.type === 'kills') {
-      compactObjective = `Obj ${bState.objectiveProgress}/${objective.target} -> EXIT`;
-    } else if (objective.type === 'chest') {
-      compactObjective = `Chest ${bState.chest?.found ? 'found' : 'search'} -> EXIT`;
-    } else {
-      compactObjective = `Survive ${bState.objectiveTimer.toFixed(0)}s -> EXIT`;
-    }
+    const innerX = panelX + 14;
+    const innerW = panelW - 28;
+    const hpBarY = panelY + 58;
+    const hpBarW = 148;
+    const hpBarX = panelX + panelW - hpBarW - 14;
 
-    ctx.fillStyle = 'rgba(6, 14, 28, 0.72)';
-    ctx.fillRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
-    ctx.strokeStyle = bState.biome.palette.accent;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
+    drawRoundedRect(innerX, panelY + 10, 170, 26, 12, 'rgba(72, 228, 255, 0.18)', 'rgba(117, 238, 255, 0.6)', 1.4);
+    ctx.fillStyle = '#dff9ff';
+    ctx.font = '17px Trebuchet MS';
+    ctx.fillText(`${bState.biome.name} Biome`, innerX + 10, panelY + 28);
+
+    drawRoundedRect(panelX + panelW - 118, panelY + 10, 104, 26, 12, 'rgba(139, 109, 255, 0.2)', 'rgba(200, 184, 255, 0.5)', 1.2);
+    ctx.fillStyle = '#f0ecff';
+    ctx.font = '16px Trebuchet MS';
+    ctx.fillText(scoreText, panelX + panelW - 106, panelY + 28);
+
+    drawRoundedRect(hpBarX, hpBarY, hpBarW, 14, 7, 'rgba(39, 15, 22, 0.85)', 'rgba(255, 219, 227, 0.65)', 1);
+    drawRoundedRect(hpBarX, hpBarY, hpBarW * hpRatio, 14, 7, 'rgba(255, 105, 130, 0.95)');
+    ctx.fillStyle = '#ffeef3';
+    ctx.font = '13px Trebuchet MS';
+    ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, hpBarX + 2, hpBarY - 6);
 
     ctx.fillStyle = '#dff4ff';
-    ctx.font = '18px Trebuchet MS';
-    ctx.fillText(`${bState.biome.name} | Score ${Math.floor(state.score)}`, pad + 12, hudTop + 30);
-    ctx.font = '17px Trebuchet MS';
-    ctx.fillText(compactObjective, pad + 12, hudTop + 58);
-    ctx.fillText(`Weapon ${bState.biome.weapon.replace('_', ' ')} | Shop ${state.shopUnlocked ? 'ON' : 'LOCKED'}`, pad + 12, hudTop + 84);
-
-    ctx.fillStyle = '#281319';
-    ctx.fillRect(hpX, hudTop + 20, hpWidth, 18);
-    ctx.fillStyle = '#ff6373';
-    ctx.fillRect(hpX, hudTop + 20, hpWidth * (player.hp / player.maxHp), 18);
-    ctx.strokeStyle = '#ffe7eb';
-    ctx.strokeRect(hpX, hudTop + 20, hpWidth, 18);
-    ctx.fillStyle = '#f9f9ff';
     ctx.font = '16px Trebuchet MS';
-    ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}`, hpX, hudTop + 60);
+    ctx.fillText(objective.compact, innerX, panelY + 64);
+    ctx.fillStyle = 'rgba(214, 250, 255, 0.85)';
+    ctx.font = '14px Trebuchet MS';
+    ctx.fillText('Reach EXIT to clear biome', innerX, panelY + 84);
+
+    const objectiveBarY = panelY + 92;
+    drawRoundedRect(innerX, objectiveBarY, innerW, 16, 8, 'rgba(8, 18, 30, 0.86)', 'rgba(157, 238, 255, 0.45)', 1);
+    const objectiveFillW = objective.ratio > 0 ? Math.max(8, innerW * objective.ratio) : 0;
+    drawRoundedRect(innerX, objectiveBarY, objectiveFillW, 16, 8, `${accent}cc`);
+
+    drawRoundedRect(innerX, panelY + 115, 176, 22, 11, 'rgba(255, 255, 255, 0.07)', 'rgba(195, 240, 255, 0.28)', 1);
+    ctx.fillStyle = '#dbf7ff';
+    ctx.font = '14px Trebuchet MS';
+    ctx.fillText(`Weapon: ${weaponText}`, innerX + 8, panelY + 131);
+
+    drawRoundedRect(panelX + panelW - 220, panelY + 115, 206, 22, 11, 'rgba(255, 255, 255, 0.07)', 'rgba(195, 240, 255, 0.28)', 1);
+    ctx.fillStyle = state.shopUnlocked ? '#a8ffcf' : '#ffd7a8';
+    ctx.fillText(shopText, panelX + panelW - 208, panelY + 131);
     return;
   }
 
-  const hudTop = 12;
-  const hudHeight = 108;
-  ctx.fillStyle = 'rgba(6, 14, 28, 0.68)';
-  ctx.fillRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
-  ctx.strokeStyle = bState.biome.palette.accent;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
+  const leftX = panelX + 18;
+  const leftW = panelW * 0.45;
+  const midX = panelX + panelW * 0.48;
+  const rightX = panelX + panelW * 0.76;
+  const rightW = panelW - (rightX - panelX) - 16;
 
-  ctx.fillStyle = '#dff4ff';
-  ctx.font = '24px Trebuchet MS';
-  ctx.fillText(`${bState.biome.name} Biome`, pad + 16, hudTop + 34);
+  ctx.strokeStyle = 'rgba(180, 240, 255, 0.24)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(midX - 18, panelY + 16);
+  ctx.lineTo(midX - 18, panelY + panelH - 14);
+  ctx.moveTo(rightX - 18, panelY + 16);
+  ctx.lineTo(rightX - 18, panelY + panelH - 14);
+  ctx.stroke();
+
+  drawRoundedRect(leftX, panelY + 12, 180, 28, 13, 'rgba(72, 228, 255, 0.16)', 'rgba(117, 238, 255, 0.56)', 1.2);
+  ctx.fillStyle = '#ddf8ff';
+  ctx.font = '20px Trebuchet MS';
+  ctx.fillText(`${bState.biome.name} Biome`, leftX + 10, panelY + 32);
+  ctx.fillStyle = '#d8f1ff';
   ctx.font = '18px Trebuchet MS';
-  ctx.fillText(`Weapon: ${bState.biome.weapon.replace('_', ' ')}`, pad + 16, hudTop + 60);
-  ctx.fillText(objectiveText(), pad + 16, hudTop + 88);
+  ctx.fillText(objective.full, leftX, panelY + 66);
+  drawRoundedRect(leftX, panelY + 78, leftW - 20, 18, 9, 'rgba(9, 19, 30, 0.9)', 'rgba(157, 238, 255, 0.42)', 1);
+  const desktopObjectiveFill = objective.ratio > 0 ? Math.max(8, (leftW - 20) * objective.ratio) : 0;
+  drawRoundedRect(leftX, panelY + 78, desktopObjectiveFill, 18, 9, `${accent}cc`);
 
-  ctx.fillStyle = '#dff4ff';
-  ctx.fillText(`Score: ${Math.floor(state.score)}`, 520, hudTop + 34);
-  ctx.fillText(`Skin: ${getEquippedItem()?.name || 'Default Neon'}`, 520, hudTop + 60);
-  ctx.fillText(`Shop: ${state.shopUnlocked ? 'Unlocked (K)' : 'Locked at 175'}`, 520, hudTop + 88);
+  ctx.fillStyle = '#e5f7ff';
+  ctx.font = '17px Trebuchet MS';
+  ctx.fillText(`Score: ${scoreText}`, midX, panelY + 32);
+  ctx.fillText(`Weapon: ${weaponText}`, midX, panelY + 58);
+  ctx.fillText(`Skin: ${skinText}`, midX, panelY + 84);
 
-  const hpWidth = 260;
-  const hpX = viewWidth - hpWidth - 40;
-  ctx.fillStyle = '#281319';
-  ctx.fillRect(hpX, hudTop + 18, hpWidth, 20);
-  ctx.fillStyle = '#ff6373';
-  ctx.fillRect(hpX, hudTop + 18, hpWidth * (player.hp / player.maxHp), 20);
-  ctx.strokeStyle = '#ffe7eb';
-  ctx.strokeRect(hpX, hudTop + 18, hpWidth, 20);
-  ctx.fillStyle = '#f9f9ff';
-  ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, hpX, hudTop + 64);
+  drawRoundedRect(midX, panelY + 92, 210, 20, 10, 'rgba(255, 255, 255, 0.07)', 'rgba(200, 244, 255, 0.3)', 1);
+  ctx.fillStyle = state.shopUnlocked ? '#a8ffcf' : '#ffd7a8';
+  ctx.font = '15px Trebuchet MS';
+  ctx.fillText(shopText, midX + 8, panelY + 107);
+
+  drawRoundedRect(rightX, panelY + 18, rightW, 88, 14, 'rgba(10, 20, 34, 0.85)', 'rgba(229, 242, 255, 0.35)', 1.2);
+  ctx.fillStyle = '#f4f8ff';
+  ctx.font = '18px Trebuchet MS';
+  ctx.fillText('HP', rightX + 12, panelY + 42);
+  drawRoundedRect(rightX + 52, panelY + 26, rightW - 66, 20, 9, 'rgba(43, 16, 24, 0.9)', 'rgba(255, 232, 238, 0.65)', 1);
+  drawRoundedRect(rightX + 52, panelY + 26, (rightW - 66) * hpRatio, 20, 9, 'rgba(255, 105, 130, 0.95)');
+  ctx.fillStyle = '#ffeef4';
+  ctx.font = '17px Trebuchet MS';
+  ctx.fillText(`${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, rightX + 12, panelY + 74);
 }
 
 function drawOverlay() {
@@ -1571,13 +1728,15 @@ function drawOverlay() {
     ctx.font = `${mobile ? 22 : 25}px Trebuchet MS`;
     ctx.fillStyle = '#f2fbff';
     if (mobile) {
-      ctx.fillText('Touch controls: LEFT/RIGHT + JUMP/ATK/DASH', centerX, 300);
-      ctx.fillText('Top buttons: START, PAUSE, SHOP, FULL', centerX, 340);
-      ctx.fillText('Tap START to begin', centerX, 404);
-      ctx.fillText('Biomes: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 454);
+      ctx.fillText('Touch controls: MOVE PAD + JUMP/ATK/DASH', centerX, 300);
+      ctx.fillText('Top buttons: START, PAUSE, SHOP', centerX, 340);
+      ctx.fillText('Tap left half to jump, right half to attack', centerX, 390);
+      ctx.fillText('Double tap right half to dash', centerX, 430);
+      ctx.fillText('Tap START to begin', centerX, 480);
+      ctx.fillText('Biomes: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 530);
     } else {
       ctx.fillText('Arrow Keys = Move | A = Attack | Shift = Dash', centerX, 250);
-      ctx.fillText('Esc/P = Pause | F = Fullscreen | K = Shop (when unlocked)', centerX, 290);
+      ctx.fillText('Esc/P = Pause | K = Shop (when unlocked)', centerX, 290);
       ctx.fillText('Press Enter to Start', centerX, 380);
       ctx.fillText('Mobile: Use on-screen controls and tap START', centerX, 420);
       ctx.fillText('Objective order: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 470);
@@ -1819,7 +1978,15 @@ function resizeCanvas() {
 }
 
 window.addEventListener('resize', resizeCanvas);
-document.addEventListener('fullscreenchange', resizeCanvas);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    releaseAllTouchHolds();
+    if (state.mode === MODES.PLAYING) {
+      state.mode = MODES.PAUSED;
+      state.previousMode = MODES.PLAYING;
+    }
+  }
+});
 
 window.addEventListener('keydown', (event) => {
   sound.touch();

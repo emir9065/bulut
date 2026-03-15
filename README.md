@@ -15,8 +15,12 @@ npm run dev
 - `A`: Attack
 - `Shift`: Dash
 - `Esc` / `P`: Pause
-- `F`: Toggle fullscreen (`Esc` exits fullscreen)
 - `K`: Open shop (after unlock)
+
+Mobile:
+- Fullscreen web layout with overlaid touch controls
+- Left thumb movement pad + right action buttons (`JUMP`, `ATK`, `DASH`)
+- Canvas shortcuts: left-half tap = jump, right-half tap = attack, right-half double-tap = dash
 
 ## Campaign Biomes
 
