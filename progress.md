@@ -7,3 +7,5 @@ Original prompt: PLEASE IMPLEMENT THIS PLAN for a side-view biome combat platfor
 - Added lightweight synthesized SFX/music via WebAudio for no-asset audio coverage.
 - Fixed runtime console error by adding `public/favicon.svg` and linking it in `index.html`.
 - Adjusted input priority so `Esc` exits fullscreen before pause/shop handling, matching the control contract.
+- Fix branch `codex/fix-forest-exit-clear`: added explicit `exitGate` progression trigger so touching biome end clears level and enables Enter-to-next flow.
+- Verified fix with browser automation: touching forest exit sets `mode=biome_complete`, then pressing Enter transitions to `Sea` biome.
