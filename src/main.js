@@ -2,6 +2,7 @@ import './style.css';
 
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 720;
+const MOBILE_VIEW_WIDTH = 640;
 const GROUND_Y = 620;
 const FIXED_DT = 1 / 60;
 const MODES = {
@@ -145,11 +146,19 @@ const SHOP_ITEMS = [
   },
 ];
 
+function getViewWidth() {
+  return isLikelyMobilePlaySurface() ? MOBILE_VIEW_WIDTH : VIEW_WIDTH;
+}
+
+function getViewHeight() {
+  return VIEW_HEIGHT;
+}
+
 const app = document.querySelector('#app');
 const canvas = document.createElement('canvas');
 const ctx = canvas.getContext('2d');
-canvas.width = VIEW_WIDTH;
-canvas.height = VIEW_HEIGHT;
+canvas.width = getViewWidth();
+canvas.height = getViewHeight();
 canvas.setAttribute('aria-label', 'Biome Combat Platformer');
 app.append(canvas);
 
@@ -276,6 +285,8 @@ const state = {
   flashTextTimer: 0,
   cameraX: 0,
   biomeState: null,
+  renderScaleX: 1,
+  renderScaleY: 1,
   touch: {
     enabled: false,
     hold: {
@@ -494,6 +505,7 @@ function updateTouchUiState() {
   const enabled = isLikelyMobilePlaySurface();
   state.touch.enabled = enabled;
   state.touch.ui.root.classList.toggle('hidden', !enabled);
+  app.classList.toggle('mobile-mode', enabled);
 
   if (!enabled) {
     releaseAllTouchHolds();
@@ -513,7 +525,11 @@ function updateTouchUiState() {
     buttons.confirm.textContent = 'RESUME';
   }
 
-  buttons.pause.hidden = state.mode === MODES.MENU || state.mode === MODES.BIOME_COMPLETE || state.mode === MODES.VICTORY;
+  buttons.pause.hidden =
+    state.mode === MODES.MENU ||
+    state.mode === MODES.BIOME_COMPLETE ||
+    state.mode === MODES.VICTORY ||
+    state.mode === MODES.PAUSED;
   buttons.pause.textContent = state.mode === MODES.PAUSED ? 'PLAY' : 'PAUSE';
   buttons.shop.hidden = state.mode === MODES.SHOP;
   buttons.shop.disabled = !state.shopUnlocked;
@@ -561,7 +577,7 @@ function makePlayer() {
 
 function generatePlatforms(worldWidth, biomeIndex) {
   const rng = mulberry32(1000 + biomeIndex * 177);
-  const platforms = [{ x: 0, y: GROUND_Y, w: worldWidth, h: VIEW_HEIGHT - GROUND_Y }];
+  const platforms = [{ x: 0, y: GROUND_Y, w: worldWidth, h: getViewHeight() - GROUND_Y }];
 
   let x = 250;
   while (x < worldWidth - 220) {
@@ -1048,7 +1064,7 @@ function updateProjectiles() {
     shot.x += shot.vx * FIXED_DT;
     shot.y += shot.vy * FIXED_DT;
 
-    if (shot.x < -80 || shot.x > bState.biome.worldWidth + 80 || shot.y < -80 || shot.y > VIEW_HEIGHT + 80) {
+    if (shot.x < -80 || shot.x > bState.biome.worldWidth + 80 || shot.y < -80 || shot.y > getViewHeight() + 80) {
       bState.projectiles.splice(i, 1);
       continue;
     }
@@ -1175,8 +1191,9 @@ function updateParticles() {
 function updateCamera() {
   const bState = state.biomeState;
   const playerCenter = bState.player.x + bState.player.w / 2;
-  const targetX = playerCenter - VIEW_WIDTH * 0.45;
-  state.cameraX = clamp(lerp(state.cameraX, targetX, 0.08), 0, bState.biome.worldWidth - VIEW_WIDTH);
+  const viewWidth = getViewWidth();
+  const targetX = playerCenter - viewWidth * 0.45;
+  state.cameraX = clamp(lerp(state.cameraX, targetX, 0.08), 0, bState.biome.worldWidth - viewWidth);
 }
 
 function processGlobalInputs() {
@@ -1268,15 +1285,17 @@ function updateGame() {
 }
 
 function drawBackground(biome) {
-  const gradient = ctx.createLinearGradient(0, 0, 0, VIEW_HEIGHT);
+  const viewWidth = getViewWidth();
+  const viewHeight = getViewHeight();
+  const gradient = ctx.createLinearGradient(0, 0, 0, viewHeight);
   gradient.addColorStop(0, biome.palette.bgTop);
   gradient.addColorStop(1, biome.palette.bgBottom);
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+  ctx.fillRect(0, 0, viewWidth, viewHeight);
 
   if (biome.id === 'forest') {
     for (let i = 0; i < 20; i += 1) {
-      const x = (i * 220 - state.cameraX * 0.45) % (VIEW_WIDTH + 260) - 130;
+      const x = (i * 220 - state.cameraX * 0.45) % (viewWidth + 260) - 130;
       const y = 210 + (i % 3) * 40;
       ctx.fillStyle = '#234f2d';
       ctx.fillRect(x + 20, y + 90, 14, 120);
@@ -1293,7 +1312,7 @@ function drawBackground(biome) {
   if (biome.id === 'sea') {
     ctx.fillStyle = 'rgba(109, 216, 255, 0.15)';
     for (let i = 0; i < 16; i += 1) {
-      const x = (i * 160 - state.cameraX * 0.38) % (VIEW_WIDTH + 180) - 90;
+      const x = (i * 160 - state.cameraX * 0.38) % (viewWidth + 180) - 90;
       const y = 180 + Math.sin((state.campaignTime * 2) + i) * 18;
       ctx.beginPath();
       ctx.ellipse(x, y, 70, 22, 0, 0, Math.PI * 2);
@@ -1303,7 +1322,7 @@ function drawBackground(biome) {
 
   if (biome.id === 'volcano') {
     for (let i = 0; i < 9; i += 1) {
-      const x = (i * 240 - state.cameraX * 0.42) % (VIEW_WIDTH + 280) - 140;
+      const x = (i * 240 - state.cameraX * 0.42) % (viewWidth + 280) - 140;
       ctx.beginPath();
       ctx.moveTo(x, 360);
       ctx.lineTo(x + 140, 130 + (i % 3) * 40);
@@ -1319,8 +1338,8 @@ function drawBackground(biome) {
   if (biome.id === 'snow') {
     ctx.fillStyle = 'rgba(235, 249, 255, 0.58)';
     for (let i = 0; i < 120; i += 1) {
-      const x = (i * 33 + state.campaignTime * 40) % VIEW_WIDTH;
-      const y = (i * 51 + state.campaignTime * 28) % VIEW_HEIGHT;
+      const x = (i * 33 + state.campaignTime * 40) % viewWidth;
+      const y = (i * 51 + state.campaignTime * 28) % viewHeight;
       ctx.fillRect(x, y, 2, 2);
     }
   }
@@ -1341,8 +1360,8 @@ function drawBackground(biome) {
   if (biome.id === 'space') {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
     for (let i = 0; i < 140; i += 1) {
-      const x = (i * 71 - state.cameraX * 0.18) % (VIEW_WIDTH + 80) - 40;
-      const y = (i * 127) % VIEW_HEIGHT;
+      const x = (i * 71 - state.cameraX * 0.18) % (viewWidth + 80) - 40;
+      const y = (i * 127) % viewHeight;
       ctx.fillRect(x, y, 2, 2);
     }
     ctx.fillStyle = 'rgba(196, 120, 255, 0.35)';
@@ -1459,142 +1478,227 @@ function objectiveText() {
 function drawHud() {
   const bState = state.biomeState;
   const player = bState.player;
+  const viewWidth = getViewWidth();
+  const mobile = state.touch.enabled;
+  const pad = mobile ? 10 : 12;
 
+  if (mobile) {
+    const hudTop = 88;
+    const hudHeight = 118;
+    const hpWidth = 132;
+    const hpX = viewWidth - hpWidth - 14;
+    const objective = bState.biome.objective;
+    let compactObjective = 'Reach EXIT';
+    if (objective.type === 'kills') {
+      compactObjective = `Obj ${bState.objectiveProgress}/${objective.target} -> EXIT`;
+    } else if (objective.type === 'chest') {
+      compactObjective = `Chest ${bState.chest?.found ? 'found' : 'search'} -> EXIT`;
+    } else {
+      compactObjective = `Survive ${bState.objectiveTimer.toFixed(0)}s -> EXIT`;
+    }
+
+    ctx.fillStyle = 'rgba(6, 14, 28, 0.72)';
+    ctx.fillRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
+    ctx.strokeStyle = bState.biome.palette.accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
+
+    ctx.fillStyle = '#dff4ff';
+    ctx.font = '18px Trebuchet MS';
+    ctx.fillText(`${bState.biome.name} | Score ${Math.floor(state.score)}`, pad + 12, hudTop + 30);
+    ctx.font = '17px Trebuchet MS';
+    ctx.fillText(compactObjective, pad + 12, hudTop + 58);
+    ctx.fillText(`Weapon ${bState.biome.weapon.replace('_', ' ')} | Shop ${state.shopUnlocked ? 'ON' : 'LOCKED'}`, pad + 12, hudTop + 84);
+
+    ctx.fillStyle = '#281319';
+    ctx.fillRect(hpX, hudTop + 20, hpWidth, 18);
+    ctx.fillStyle = '#ff6373';
+    ctx.fillRect(hpX, hudTop + 20, hpWidth * (player.hp / player.maxHp), 18);
+    ctx.strokeStyle = '#ffe7eb';
+    ctx.strokeRect(hpX, hudTop + 20, hpWidth, 18);
+    ctx.fillStyle = '#f9f9ff';
+    ctx.font = '16px Trebuchet MS';
+    ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}`, hpX, hudTop + 60);
+    return;
+  }
+
+  const hudTop = 12;
+  const hudHeight = 108;
   ctx.fillStyle = 'rgba(6, 14, 28, 0.68)';
-  ctx.fillRect(12, 12, VIEW_WIDTH - 24, 108);
+  ctx.fillRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
   ctx.strokeStyle = bState.biome.palette.accent;
   ctx.lineWidth = 2;
-  ctx.strokeRect(12, 12, VIEW_WIDTH - 24, 108);
+  ctx.strokeRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
 
   ctx.fillStyle = '#dff4ff';
   ctx.font = '24px Trebuchet MS';
-  ctx.fillText(`${bState.biome.name} Biome`, 28, 46);
+  ctx.fillText(`${bState.biome.name} Biome`, pad + 16, hudTop + 34);
   ctx.font = '18px Trebuchet MS';
-  ctx.fillText(`Weapon: ${bState.biome.weapon.replace('_', ' ')}`, 28, 72);
-  ctx.fillText(objectiveText(), 28, 98);
+  ctx.fillText(`Weapon: ${bState.biome.weapon.replace('_', ' ')}`, pad + 16, hudTop + 60);
+  ctx.fillText(objectiveText(), pad + 16, hudTop + 88);
 
   ctx.fillStyle = '#dff4ff';
-  ctx.fillText(`Score: ${Math.floor(state.score)}`, 520, 46);
-  ctx.fillText(`Skin: ${getEquippedItem()?.name || 'Default Neon'}`, 520, 72);
-  ctx.fillText(`Shop: ${state.shopUnlocked ? 'Unlocked (K)' : 'Locked at 175'}`, 520, 98);
+  ctx.fillText(`Score: ${Math.floor(state.score)}`, 520, hudTop + 34);
+  ctx.fillText(`Skin: ${getEquippedItem()?.name || 'Default Neon'}`, 520, hudTop + 60);
+  ctx.fillText(`Shop: ${state.shopUnlocked ? 'Unlocked (K)' : 'Locked at 175'}`, 520, hudTop + 88);
 
   const hpWidth = 260;
-  const hpX = VIEW_WIDTH - hpWidth - 40;
+  const hpX = viewWidth - hpWidth - 40;
   ctx.fillStyle = '#281319';
-  ctx.fillRect(hpX, 30, hpWidth, 20);
+  ctx.fillRect(hpX, hudTop + 18, hpWidth, 20);
   ctx.fillStyle = '#ff6373';
-  ctx.fillRect(hpX, 30, hpWidth * (player.hp / player.maxHp), 20);
+  ctx.fillRect(hpX, hudTop + 18, hpWidth * (player.hp / player.maxHp), 20);
   ctx.strokeStyle = '#ffe7eb';
-  ctx.strokeRect(hpX, 30, hpWidth, 20);
+  ctx.strokeRect(hpX, hudTop + 18, hpWidth, 20);
   ctx.fillStyle = '#f9f9ff';
-  ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, hpX, 74);
+  ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, hpX, hudTop + 64);
 }
 
 function drawOverlay() {
   const bState = state.biomeState;
+  const viewWidth = getViewWidth();
+  const viewHeight = getViewHeight();
+  const centerX = viewWidth / 2;
+  const mobile = state.touch.enabled;
 
   if (state.mode === MODES.MENU) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.62)';
-    ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    ctx.fillRect(0, 0, viewWidth, viewHeight);
     ctx.fillStyle = '#8af4ff';
-    ctx.font = '58px Trebuchet MS';
-    ctx.fillText('Biome Combat Platformer', 230, 170);
-    ctx.font = '25px Trebuchet MS';
+    ctx.font = `${mobile ? 44 : 58}px Trebuchet MS`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Biome Combat Platformer', centerX, mobile ? 210 : 170);
+    ctx.font = `${mobile ? 22 : 25}px Trebuchet MS`;
     ctx.fillStyle = '#f2fbff';
-    ctx.fillText('Arrow Keys = Move | A = Attack | Shift = Dash', 305, 250);
-    ctx.fillText('Esc/P = Pause | F = Fullscreen | K = Shop (when unlocked)', 238, 290);
-    ctx.fillText('Press Enter to Start', 490, 380);
-    ctx.fillText('Mobile: Use on-screen controls and tap START', 345, 420);
-    ctx.fillText('Objective order: Forest, Sea, Volcano, Snow, Cave, Space', 260, 470);
+    if (mobile) {
+      ctx.fillText('Touch controls: LEFT/RIGHT + JUMP/ATK/DASH', centerX, 300);
+      ctx.fillText('Top buttons: START, PAUSE, SHOP, FULL', centerX, 340);
+      ctx.fillText('Tap START to begin', centerX, 404);
+      ctx.fillText('Biomes: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 454);
+    } else {
+      ctx.fillText('Arrow Keys = Move | A = Attack | Shift = Dash', centerX, 250);
+      ctx.fillText('Esc/P = Pause | F = Fullscreen | K = Shop (when unlocked)', centerX, 290);
+      ctx.fillText('Press Enter to Start', centerX, 380);
+      ctx.fillText('Mobile: Use on-screen controls and tap START', centerX, 420);
+      ctx.fillText('Objective order: Forest, Sea, Volcano, Snow, Cave, Space', centerX, 470);
+    }
+    ctx.textAlign = 'start';
     return;
   }
 
   if (state.mode === MODES.PAUSED) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.58)';
-    ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    ctx.fillRect(0, 0, viewWidth, viewHeight);
     ctx.fillStyle = '#a9f0ff';
-    ctx.font = '54px Trebuchet MS';
-    ctx.fillText('Paused', 540, 280);
-    ctx.font = '24px Trebuchet MS';
-    ctx.fillText('Press Esc or P to resume', 470, 335);
+    ctx.font = `${mobile ? 42 : 54}px Trebuchet MS`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Paused', centerX, 280);
+    ctx.font = `${mobile ? 22 : 24}px Trebuchet MS`;
+    ctx.fillText(mobile ? 'Tap RESUME to continue' : 'Press Esc or P to resume', centerX, 335);
+    ctx.textAlign = 'start';
     return;
   }
 
   if (state.mode === MODES.BIOME_COMPLETE) {
     ctx.fillStyle = 'rgba(5, 12, 20, 0.66)';
-    ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    ctx.fillRect(0, 0, viewWidth, viewHeight);
     ctx.fillStyle = bState.biome.palette.accent;
-    ctx.font = '56px Trebuchet MS';
-    ctx.fillText(`${bState.biome.name} Cleared`, 420, 255);
-    ctx.font = '26px Trebuchet MS';
+    ctx.font = `${mobile ? 42 : 56}px Trebuchet MS`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${bState.biome.name} Cleared`, centerX, 255);
+    ctx.font = `${mobile ? 22 : 26}px Trebuchet MS`;
     ctx.fillStyle = '#e9f8ff';
-    ctx.fillText('Biome bonus: +25 points', 500, 305);
-    ctx.fillText('Press Enter for next biome', 450, 350);
+    ctx.fillText('Biome bonus: +25 points', centerX, 305);
+    ctx.fillText(mobile ? 'Tap NEXT to continue' : 'Press Enter for next biome', centerX, 350);
+    ctx.textAlign = 'start';
     return;
   }
 
   if (state.mode === MODES.VICTORY) {
     ctx.fillStyle = 'rgba(6, 10, 26, 0.72)';
-    ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    ctx.fillRect(0, 0, viewWidth, viewHeight);
     ctx.fillStyle = '#f69dff';
-    ctx.font = '58px Trebuchet MS';
-    ctx.fillText('Victory Across All Biomes', 310, 250);
-    ctx.font = '28px Trebuchet MS';
+    ctx.font = `${mobile ? 40 : 58}px Trebuchet MS`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Victory Across All Biomes', centerX, 250);
+    ctx.font = `${mobile ? 22 : 28}px Trebuchet MS`;
     ctx.fillStyle = '#e8f8ff';
-    ctx.fillText(`Final Score: ${Math.floor(state.score)}`, 525, 308);
-    ctx.fillText('Press Enter to restart campaign', 430, 360);
+    ctx.fillText(`Final Score: ${Math.floor(state.score)}`, centerX, 308);
+    ctx.fillText(mobile ? 'Tap RESTART to play again' : 'Press Enter to restart campaign', centerX, 360);
+    ctx.textAlign = 'start';
     return;
   }
 
   if (state.mode === MODES.SHOP) {
     ctx.fillStyle = 'rgba(3, 8, 14, 0.86)';
-    ctx.fillRect(90, 60, VIEW_WIDTH - 180, VIEW_HEIGHT - 120);
+    const panelX = mobile ? 22 : 90;
+    const panelY = mobile ? 48 : 60;
+    const panelW = viewWidth - (mobile ? 44 : 180);
+    const panelH = viewHeight - (mobile ? 104 : 120);
+    ctx.fillRect(panelX, panelY, panelW, panelH);
     ctx.strokeStyle = '#7ce5ff';
     ctx.lineWidth = 2;
-    ctx.strokeRect(90, 60, VIEW_WIDTH - 180, VIEW_HEIGHT - 120);
+    ctx.strokeRect(panelX, panelY, panelW, panelH);
     ctx.fillStyle = '#8bf1ff';
-    ctx.font = '46px Trebuchet MS';
-    ctx.fillText('Neon Skin Shop', 465, 120);
-    ctx.font = '24px Trebuchet MS';
+    ctx.font = `${mobile ? 34 : 46}px Trebuchet MS`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Neon Skin Shop', centerX, mobile ? 100 : 120);
+    ctx.font = `${mobile ? 18 : 24}px Trebuchet MS`;
     ctx.fillStyle = '#f2fbff';
-    ctx.fillText(`Score: ${Math.floor(state.score)}   (Arrow keys + Enter)`, 370, 162);
+    ctx.fillText(
+      mobile ? `Score: ${Math.floor(state.score)} (Touch UP/DOWN/BUY)` : `Score: ${Math.floor(state.score)}   (Arrow keys + Enter)`,
+      centerX,
+      mobile ? 130 : 162,
+    );
 
     for (let i = 0; i < SHOP_ITEMS.length; i += 1) {
       const item = SHOP_ITEMS[i];
-      const y = 208 + i * 70;
+      const y = (mobile ? 168 : 208) + i * (mobile ? 68 : 70);
       const selected = i === state.shopCursor;
       const owned = state.ownedItems.has(item.id);
       const equipped = state.equippedItemId === item.id;
       ctx.fillStyle = selected ? 'rgba(71, 207, 255, 0.25)' : 'rgba(255, 255, 255, 0.04)';
-      ctx.fillRect(148, y - 30, VIEW_WIDTH - 296, 54);
+      ctx.fillRect(panelX + 24, y - 30, panelW - 48, 54);
       ctx.fillStyle = item.color;
-      ctx.fillRect(162, y - 17, 22, 22);
+      ctx.fillRect(panelX + 38, y - 17, 22, 22);
       ctx.fillStyle = '#e8f8ff';
-      ctx.font = '22px Trebuchet MS';
+      ctx.font = `${mobile ? 17 : 22}px Trebuchet MS`;
       const perk = item.perkText ? ` (${item.perkText})` : '';
-      ctx.fillText(`${item.name}${perk}`, 200, y);
+      ctx.textAlign = 'start';
+      ctx.fillText(`${item.name}${perk}`, panelX + 76, y);
       let status = owned ? 'Owned' : `${item.cost} pts`;
       if (equipped) {
         status = 'Equipped';
       }
       ctx.fillStyle = owned ? '#99ffcb' : '#ffd9a6';
-      ctx.fillText(status, VIEW_WIDTH - 310, y);
+      ctx.fillText(status, panelX + panelW - (mobile ? 118 : 142), y);
     }
 
     ctx.fillStyle = '#cdefff';
-    ctx.fillText('Esc: close', 540, VIEW_HEIGHT - 92);
+    ctx.textAlign = 'center';
+    ctx.font = `${mobile ? 16 : 22}px Trebuchet MS`;
+    ctx.fillText(mobile ? 'Tap CLOSE to leave shop' : 'Esc: close', centerX, viewHeight - (mobile ? 64 : 92));
+    ctx.textAlign = 'start';
   }
 }
 
 function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(state.renderScaleX, 0, 0, state.renderScaleY, 0, 0);
+
   if (!state.biomeState) {
     const fallbackBiome = BIOMES[0];
     drawBackground(fallbackBiome);
   } else {
     drawWorld();
-    drawHud();
+    const showHud = state.mode === MODES.PLAYING || state.mode === MODES.PAUSED || state.mode === MODES.SHOP;
+    if (showHud) {
+      drawHud();
+    }
   }
   drawOverlay();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 function tick() {
@@ -1621,7 +1725,7 @@ window.render_game_to_text = () => {
   }
   const bState = state.biomeState;
   const viewportMinX = state.cameraX;
-  const viewportMaxX = state.cameraX + VIEW_WIDTH;
+  const viewportMaxX = state.cameraX + getViewWidth();
   const visibleEnemies = bState.enemies
     .filter((enemy) => enemy.x + enemy.w > viewportMinX && enemy.x < viewportMaxX)
     .map((enemy) => ({
@@ -1687,9 +1791,30 @@ window.render_game_to_text = () => {
 };
 
 function resizeCanvas() {
-  const scale = Math.min(window.innerWidth / VIEW_WIDTH, window.innerHeight / VIEW_HEIGHT);
-  canvas.style.width = `${Math.floor(VIEW_WIDTH * scale)}px`;
-  canvas.style.height = `${Math.floor(VIEW_HEIGHT * scale)}px`;
+  const dpr = window.devicePixelRatio || 1;
+  const mobileFullscreen = isLikelyMobilePlaySurface();
+
+  if (mobileFullscreen) {
+    const cssWidth = Math.max(1, Math.floor(window.innerWidth));
+    const cssHeight = Math.max(1, Math.floor(window.innerHeight));
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
+    canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
+  } else {
+    const viewWidth = getViewWidth();
+    const viewHeight = getViewHeight();
+    const scale = Math.min(window.innerWidth / viewWidth, window.innerHeight / viewHeight);
+    const cssWidth = Math.max(1, Math.floor(viewWidth * scale));
+    const cssHeight = Math.max(1, Math.floor(viewHeight * scale));
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
+    canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
+  }
+
+  state.renderScaleX = canvas.width / getViewWidth();
+  state.renderScaleY = canvas.height / getViewHeight();
   updateTouchUiState();
 }
 
