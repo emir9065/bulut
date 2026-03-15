@@ -1534,16 +1534,58 @@ function drawWorld() {
   ctx.restore();
 }
 
-function objectiveText() {
-  const bState = state.biomeState;
+function formatWeaponName(weapon) {
+  return weapon
+    .split('_')
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(' ');
+}
+
+function getObjectiveStatus(bState) {
   const objective = bState.biome.objective;
   if (objective.type === 'kills') {
-    return `${objective.label}: ${bState.objectiveProgress}/${objective.target} | Reach EXIT`;
+    return {
+      full: `${objective.label}: ${bState.objectiveProgress}/${objective.target}  |  Reach EXIT`,
+      compact: `${objective.label} ${bState.objectiveProgress}/${objective.target}`,
+      ratio: clamp(bState.objectiveProgress / objective.target, 0, 1),
+    };
   }
   if (objective.type === 'chest') {
-    return `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'} | Reach EXIT`;
+    return {
+      full: `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'}  |  Reach EXIT`,
+      compact: `${objective.label}: ${bState.chest?.found ? 'Found' : 'Searching'}`,
+      ratio: bState.chest?.found ? 1 : 0,
+    };
   }
-  return `${objective.label}: ${bState.objectiveTimer.toFixed(1)}s | Reach EXIT`;
+  return {
+    full: `${objective.label}: ${bState.objectiveTimer.toFixed(1)}s  |  Reach EXIT`,
+    compact: `${objective.label}: ${bState.objectiveTimer.toFixed(0)}s`,
+    ratio: clamp(bState.objectiveTimer / objective.target, 0, 1),
+  };
+}
+
+function drawRoundedRect(x, y, w, h, radius, fillStyle, strokeStyle = null, lineWidth = 1) {
+  const r = Math.min(radius, w * 0.5, h * 0.5);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fillStyle) {
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+  }
+  if (strokeStyle) {
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = strokeStyle;
+    ctx.stroke();
+  }
 }
 
 function drawHud() {
@@ -1551,78 +1593,122 @@ function drawHud() {
   const player = bState.player;
   const viewWidth = getViewWidth();
   const mobile = state.touch.enabled;
-  const pad = mobile ? 10 : 12;
+  const pad = mobile ? 10 : 14;
+  const panelX = pad;
+  const panelY = mobile ? 84 : 10;
+  const panelW = viewWidth - pad * 2;
+  const panelH = mobile ? 146 : 124;
+  const hpRatio = clamp(player.hp / player.maxHp, 0, 1);
+  const accent = bState.biome.palette.accent;
+  const objective = getObjectiveStatus(bState);
+  const scoreText = `${Math.floor(state.score)} pts`;
+  const shopText = state.shopUnlocked ? 'Shop Ready' : `Shop in ${Math.max(0, 175 - Math.floor(state.score))}`;
+  const weaponText = formatWeaponName(bState.biome.weapon);
+  const skinText = getEquippedItem()?.name || 'Default Neon';
+
+  const gradient = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+  gradient.addColorStop(0, 'rgba(8, 18, 34, 0.9)');
+  gradient.addColorStop(1, 'rgba(5, 12, 24, 0.84)');
+  drawRoundedRect(panelX, panelY, panelW, panelH, 18, gradient, `${accent}bb`, 2);
+  ctx.strokeStyle = 'rgba(219, 248, 255, 0.16)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(panelX + 18, panelY + 42);
+  ctx.lineTo(panelX + panelW - 18, panelY + 42);
+  ctx.stroke();
 
   if (mobile) {
-    const hudTop = 88;
-    const hudHeight = 118;
-    const hpWidth = 132;
-    const hpX = viewWidth - hpWidth - 14;
-    const objective = bState.biome.objective;
-    let compactObjective = 'Reach EXIT';
-    if (objective.type === 'kills') {
-      compactObjective = `Obj ${bState.objectiveProgress}/${objective.target} -> EXIT`;
-    } else if (objective.type === 'chest') {
-      compactObjective = `Chest ${bState.chest?.found ? 'found' : 'search'} -> EXIT`;
-    } else {
-      compactObjective = `Survive ${bState.objectiveTimer.toFixed(0)}s -> EXIT`;
-    }
+    const innerX = panelX + 14;
+    const innerW = panelW - 28;
+    const hpBarY = panelY + 58;
+    const hpBarW = 148;
+    const hpBarX = panelX + panelW - hpBarW - 14;
 
-    ctx.fillStyle = 'rgba(6, 14, 28, 0.72)';
-    ctx.fillRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
-    ctx.strokeStyle = bState.biome.palette.accent;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
+    drawRoundedRect(innerX, panelY + 10, 170, 26, 12, 'rgba(72, 228, 255, 0.18)', 'rgba(117, 238, 255, 0.6)', 1.4);
+    ctx.fillStyle = '#dff9ff';
+    ctx.font = '17px Trebuchet MS';
+    ctx.fillText(`${bState.biome.name} Biome`, innerX + 10, panelY + 28);
+
+    drawRoundedRect(panelX + panelW - 118, panelY + 10, 104, 26, 12, 'rgba(139, 109, 255, 0.2)', 'rgba(200, 184, 255, 0.5)', 1.2);
+    ctx.fillStyle = '#f0ecff';
+    ctx.font = '16px Trebuchet MS';
+    ctx.fillText(scoreText, panelX + panelW - 106, panelY + 28);
+
+    drawRoundedRect(hpBarX, hpBarY, hpBarW, 14, 7, 'rgba(39, 15, 22, 0.85)', 'rgba(255, 219, 227, 0.65)', 1);
+    drawRoundedRect(hpBarX, hpBarY, hpBarW * hpRatio, 14, 7, 'rgba(255, 105, 130, 0.95)');
+    ctx.fillStyle = '#ffeef3';
+    ctx.font = '13px Trebuchet MS';
+    ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, hpBarX + 2, hpBarY - 6);
 
     ctx.fillStyle = '#dff4ff';
-    ctx.font = '18px Trebuchet MS';
-    ctx.fillText(`${bState.biome.name} | Score ${Math.floor(state.score)}`, pad + 12, hudTop + 30);
-    ctx.font = '17px Trebuchet MS';
-    ctx.fillText(compactObjective, pad + 12, hudTop + 58);
-    ctx.fillText(`Weapon ${bState.biome.weapon.replace('_', ' ')} | Shop ${state.shopUnlocked ? 'ON' : 'LOCKED'}`, pad + 12, hudTop + 84);
-
-    ctx.fillStyle = '#281319';
-    ctx.fillRect(hpX, hudTop + 20, hpWidth, 18);
-    ctx.fillStyle = '#ff6373';
-    ctx.fillRect(hpX, hudTop + 20, hpWidth * (player.hp / player.maxHp), 18);
-    ctx.strokeStyle = '#ffe7eb';
-    ctx.strokeRect(hpX, hudTop + 20, hpWidth, 18);
-    ctx.fillStyle = '#f9f9ff';
     ctx.font = '16px Trebuchet MS';
-    ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}`, hpX, hudTop + 60);
+    ctx.fillText(objective.compact, innerX, panelY + 64);
+    ctx.fillStyle = 'rgba(214, 250, 255, 0.85)';
+    ctx.font = '14px Trebuchet MS';
+    ctx.fillText('Reach EXIT to clear biome', innerX, panelY + 84);
+
+    const objectiveBarY = panelY + 92;
+    drawRoundedRect(innerX, objectiveBarY, innerW, 16, 8, 'rgba(8, 18, 30, 0.86)', 'rgba(157, 238, 255, 0.45)', 1);
+    const objectiveFillW = objective.ratio > 0 ? Math.max(8, innerW * objective.ratio) : 0;
+    drawRoundedRect(innerX, objectiveBarY, objectiveFillW, 16, 8, `${accent}cc`);
+
+    drawRoundedRect(innerX, panelY + 115, 176, 22, 11, 'rgba(255, 255, 255, 0.07)', 'rgba(195, 240, 255, 0.28)', 1);
+    ctx.fillStyle = '#dbf7ff';
+    ctx.font = '14px Trebuchet MS';
+    ctx.fillText(`Weapon: ${weaponText}`, innerX + 8, panelY + 131);
+
+    drawRoundedRect(panelX + panelW - 220, panelY + 115, 206, 22, 11, 'rgba(255, 255, 255, 0.07)', 'rgba(195, 240, 255, 0.28)', 1);
+    ctx.fillStyle = state.shopUnlocked ? '#a8ffcf' : '#ffd7a8';
+    ctx.fillText(shopText, panelX + panelW - 208, panelY + 131);
     return;
   }
 
-  const hudTop = 12;
-  const hudHeight = 108;
-  ctx.fillStyle = 'rgba(6, 14, 28, 0.68)';
-  ctx.fillRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
-  ctx.strokeStyle = bState.biome.palette.accent;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(pad, hudTop, viewWidth - pad * 2, hudHeight);
+  const leftX = panelX + 18;
+  const leftW = panelW * 0.45;
+  const midX = panelX + panelW * 0.48;
+  const rightX = panelX + panelW * 0.76;
+  const rightW = panelW - (rightX - panelX) - 16;
 
-  ctx.fillStyle = '#dff4ff';
-  ctx.font = '24px Trebuchet MS';
-  ctx.fillText(`${bState.biome.name} Biome`, pad + 16, hudTop + 34);
+  ctx.strokeStyle = 'rgba(180, 240, 255, 0.24)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(midX - 18, panelY + 16);
+  ctx.lineTo(midX - 18, panelY + panelH - 14);
+  ctx.moveTo(rightX - 18, panelY + 16);
+  ctx.lineTo(rightX - 18, panelY + panelH - 14);
+  ctx.stroke();
+
+  drawRoundedRect(leftX, panelY + 12, 180, 28, 13, 'rgba(72, 228, 255, 0.16)', 'rgba(117, 238, 255, 0.56)', 1.2);
+  ctx.fillStyle = '#ddf8ff';
+  ctx.font = '20px Trebuchet MS';
+  ctx.fillText(`${bState.biome.name} Biome`, leftX + 10, panelY + 32);
+  ctx.fillStyle = '#d8f1ff';
   ctx.font = '18px Trebuchet MS';
-  ctx.fillText(`Weapon: ${bState.biome.weapon.replace('_', ' ')}`, pad + 16, hudTop + 60);
-  ctx.fillText(objectiveText(), pad + 16, hudTop + 88);
+  ctx.fillText(objective.full, leftX, panelY + 66);
+  drawRoundedRect(leftX, panelY + 78, leftW - 20, 18, 9, 'rgba(9, 19, 30, 0.9)', 'rgba(157, 238, 255, 0.42)', 1);
+  const desktopObjectiveFill = objective.ratio > 0 ? Math.max(8, (leftW - 20) * objective.ratio) : 0;
+  drawRoundedRect(leftX, panelY + 78, desktopObjectiveFill, 18, 9, `${accent}cc`);
 
-  ctx.fillStyle = '#dff4ff';
-  ctx.fillText(`Score: ${Math.floor(state.score)}`, 520, hudTop + 34);
-  ctx.fillText(`Skin: ${getEquippedItem()?.name || 'Default Neon'}`, 520, hudTop + 60);
-  ctx.fillText(`Shop: ${state.shopUnlocked ? 'Unlocked (K)' : 'Locked at 175'}`, 520, hudTop + 88);
+  ctx.fillStyle = '#e5f7ff';
+  ctx.font = '17px Trebuchet MS';
+  ctx.fillText(`Score: ${scoreText}`, midX, panelY + 32);
+  ctx.fillText(`Weapon: ${weaponText}`, midX, panelY + 58);
+  ctx.fillText(`Skin: ${skinText}`, midX, panelY + 84);
 
-  const hpWidth = 260;
-  const hpX = viewWidth - hpWidth - 40;
-  ctx.fillStyle = '#281319';
-  ctx.fillRect(hpX, hudTop + 18, hpWidth, 20);
-  ctx.fillStyle = '#ff6373';
-  ctx.fillRect(hpX, hudTop + 18, hpWidth * (player.hp / player.maxHp), 20);
-  ctx.strokeStyle = '#ffe7eb';
-  ctx.strokeRect(hpX, hudTop + 18, hpWidth, 20);
-  ctx.fillStyle = '#f9f9ff';
-  ctx.fillText(`HP ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, hpX, hudTop + 64);
+  drawRoundedRect(midX, panelY + 92, 210, 20, 10, 'rgba(255, 255, 255, 0.07)', 'rgba(200, 244, 255, 0.3)', 1);
+  ctx.fillStyle = state.shopUnlocked ? '#a8ffcf' : '#ffd7a8';
+  ctx.font = '15px Trebuchet MS';
+  ctx.fillText(shopText, midX + 8, panelY + 107);
+
+  drawRoundedRect(rightX, panelY + 18, rightW, 88, 14, 'rgba(10, 20, 34, 0.85)', 'rgba(229, 242, 255, 0.35)', 1.2);
+  ctx.fillStyle = '#f4f8ff';
+  ctx.font = '18px Trebuchet MS';
+  ctx.fillText('HP', rightX + 12, panelY + 42);
+  drawRoundedRect(rightX + 52, panelY + 26, rightW - 66, 20, 9, 'rgba(43, 16, 24, 0.9)', 'rgba(255, 232, 238, 0.65)', 1);
+  drawRoundedRect(rightX + 52, panelY + 26, (rightW - 66) * hpRatio, 20, 9, 'rgba(255, 105, 130, 0.95)');
+  ctx.fillStyle = '#ffeef4';
+  ctx.font = '17px Trebuchet MS';
+  ctx.fillText(`${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`, rightX + 12, panelY + 74);
 }
 
 function drawOverlay() {

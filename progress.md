@@ -24,7 +24,17 @@ Original prompt: PLEASE IMPLEMENT THIS PLAN for a side-view biome combat platfor
 - Validation:
   - `npm run build` successful after each change.
   - Ran `$WEB_GAME_CLIENT` scripted checks to capture gameplay screenshots/state and verify no new console errors.
-  - Ran mobile Playwright viewport capture (`390x844`, touch enabled) and confirmed `hasFullscreenButton: false` plus `mobileControlsEnabled: true` in `output/mobile-redesign-v2-report.json`.
+- Ran mobile Playwright viewport capture (`390x844`, touch enabled) and confirmed `hasFullscreenButton: false` plus `mobileControlsEnabled: true` in `output/mobile-redesign-v2-report.json`.
+- HUD redesign pass:
+  - Reworked top info section into a rounded, segmented card with stronger visual hierarchy.
+  - Added objective progress bars (desktop + mobile), clearer weapon/score/shop grouping, and dedicated HP card treatment.
+  - Improved mobile HUD spacing after screenshot review (separated score chip and HP label/bar to avoid overlap).
+  - Added utility helpers in `src/main.js`: `formatWeaponName`, `getObjectiveStatus`, and `drawRoundedRect`.
+- Verification:
+  - `npm run build` successful after HUD redesign.
+  - Captured refreshed screenshots:
+    - Desktop HUD: `output/web-game-hud-desktop/shot-0.png`
+    - Mobile HUD: `output/mobile-hud-redesign-playing-v2.png`
 
 ## TODO / Suggestions
 - Add a small in-game tutorial pulse on first launch that highlights the movement pad and action cluster for 2-3 seconds.
