@@ -31,7 +31,8 @@ Mobile:
 5. Cave
 6. Space
 
-## Testing Hooks
+## Testing Hooks (Development Only)
 
+- Available in local dev builds for automated testing
 - `window.render_game_to_text()`
 - `window.advanceTime(ms)`

@@ -280,7 +280,8 @@ const state = {
   shopCursor: 0,
   campaignTime: 0,
   levelBonusGranted: false,
-  keysDown: new Set(),
+  keyboardKeysDown: new Set(),
+  touchKeysDown: new Set(),
   keysPressed: new Set(),
   flashTextTimer: 0,
   cameraX: 0,
@@ -295,6 +296,7 @@ const state = {
       attack: false,
     },
     tap: {
+      attack: false,
       jump: false,
       dash: false,
       pause: false,
@@ -317,6 +319,7 @@ const TOUCH_HOLD_KEY_MAP = {
 };
 
 const TOUCH_TAP_KEY_MAP = {
+  attack: 'KeyA',
   jump: 'Space',
   dash: 'ShiftLeft',
   pause: 'KeyP',
@@ -369,9 +372,9 @@ function releaseAllTouchHolds() {
 function syncTouchControlsToKeys() {
   for (const [control, code] of Object.entries(TOUCH_HOLD_KEY_MAP)) {
     if (state.touch.hold[control]) {
-      state.keysDown.add(code);
+      state.touchKeysDown.add(code);
     } else {
-      state.keysDown.delete(code);
+      state.touchKeysDown.delete(code);
     }
   }
 
@@ -385,6 +388,10 @@ function syncTouchControlsToKeys() {
       state.touch.tap[control] = false;
     }
   }
+}
+
+function isKeyHeld(code) {
+  return state.keyboardKeysDown.has(code) || state.touchKeysDown.has(code);
 }
 
 function setupTouchUi() {
@@ -889,6 +896,20 @@ function grantBiomeCompletion() {
   sound.sfxBiomeClear();
 }
 
+function isObjectiveComplete(bState) {
+  const objective = bState.biome.objective;
+  if (objective.type === 'kills') {
+    return bState.objectiveProgress >= objective.target;
+  }
+  if (objective.type === 'chest') {
+    return Boolean(bState.chest?.found);
+  }
+  if (objective.type === 'survive') {
+    return bState.objectiveTimer <= 0;
+  }
+  return false;
+}
+
 function applyWeaponAttack() {
   const bState = state.biomeState;
   const player = bState.player;
@@ -1022,12 +1043,12 @@ function updatePlayer() {
   const player = bState.player;
   const modifiers = getStatModifiers();
 
-  const left = state.keysDown.has('ArrowLeft');
-  const right = state.keysDown.has('ArrowRight');
+  const left = isKeyHeld('ArrowLeft');
+  const right = isKeyHeld('ArrowRight');
   const jumpPressed =
     state.keysPressed.has('ArrowUp') || state.keysPressed.has('Space');
   const dashPressed = state.keysPressed.has('ShiftLeft') || state.keysPressed.has('ShiftRight');
-  const attackHeld = state.keysDown.has('KeyA');
+  const attackHeld = isKeyHeld('KeyA');
 
   const moving = Number(right) - Number(left);
   const baseMove = 360 * modifiers.moveMultiplier;
@@ -1115,10 +1136,10 @@ function updatePlayer() {
     bState.objectiveProgress = 1;
     state.score += 20;
     sound.sfxCollect();
-    grantBiomeCompletion();
   }
 
   if (
+    isObjectiveComplete(bState) &&
     bState.exitGate &&
     (intersects(worldRect(player), bState.exitGate) || player.x >= bState.biome.worldWidth - player.w - 4)
   ) {
@@ -1224,9 +1245,6 @@ function updateEnemies() {
     }
   }
 
-  if (bState.biome.objective.type === 'kills' && bState.objectiveProgress >= bState.biome.objective.target) {
-    grantBiomeCompletion();
-  }
 }
 
 function updateSnowEffect() {
@@ -1253,7 +1271,6 @@ function updateSnowEffect() {
 
   if (bState.objectiveTimer <= 0) {
     bState.objectiveProgress = bState.biome.objective.target;
-    grantBiomeCompletion();
   }
 }
 
@@ -1871,14 +1888,14 @@ function tick() {
   draw();
 }
 
-window.advanceTime = (ms) => {
+function advanceTimeForDebug(ms) {
   const steps = Math.max(1, Math.round(ms / (1000 / 60)));
   for (let i = 0; i < steps; i += 1) {
     tick();
   }
-};
+}
 
-window.render_game_to_text = () => {
+function renderGameToText() {
   if (!state.biomeState) {
     return JSON.stringify({ mode: state.mode, note: 'No biome loaded yet' });
   }
@@ -1947,7 +1964,12 @@ window.render_game_to_text = () => {
   };
 
   return JSON.stringify(payload);
-};
+}
+
+if (import.meta.env.DEV) {
+  window.advanceTime = advanceTimeForDebug;
+  window.render_game_to_text = renderGameToText;
+}
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
@@ -1990,7 +2012,7 @@ document.addEventListener('visibilitychange', () => {
 
 window.addEventListener('keydown', (event) => {
   sound.touch();
-  state.keysDown.add(event.code);
+  state.keyboardKeysDown.add(event.code);
   state.keysPressed.add(event.code);
 
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
@@ -1999,7 +2021,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('keyup', (event) => {
-  state.keysDown.delete(event.code);
+  state.keyboardKeysDown.delete(event.code);
 });
 
 window.addEventListener('mousedown', () => {
