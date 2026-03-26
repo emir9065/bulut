@@ -1,4 +1,9 @@
 import './style.css';
+import { inject } from '@vercel/analytics';
+
+if (!['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+  inject();
+}
 
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 720;
