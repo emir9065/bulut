@@ -1,0 +1,5 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd biome-game && npm ci && npm run build",
+  "outputDirectory": "biome-game/dist"
+}
